@@ -1,0 +1,3 @@
+# 이 Repository에 대하여...
+- Golang을 공부하고, 그 결과물을 기록하는 Repository입니다.
+- Nico의 [Golang 강의](https://nomadcoders.co/go-for-beginners/lectures/1534)를 듣고 작성된 결과물입니다.

@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -86,14 +85,18 @@ func getPages() int {
 
 	// convert string to int
 	maxNumInt, err := strconv.Atoi(maxNum)
-	maxNumInt = maxNumInt / 30
+	maxNumInt = maxNumInt/30 + 1 // page당 30개의 게시글이 있음
 	checkErr(err)
 
 	for i := maxNumInt; i > 0; i-- {
-		if checkPageAvailable(baseURL+fmt.Sprintf("%v", i), 20) {
-			return i
+		// 페이지 별 게시글이 존재하는지 확인
+		// 게시글이 삭제된 경우, num은 해당 번호를 건너뛰기 때문에 마지막 page는 존재하지 않을 수 있음
+		// 게시글의 num은 1씩 증가하고, 중복되지 않으므로 마지막 page 뒤의 게시글은 존재할 수 없음
+		// 따라서 마지막 Page부터 게시글이 존재하는지 확인하고, 최초로 게시글이 존재하는 page를 리턴합니다.
+		if checkPageAvailable(baseURL+fmt.Sprintf("%v", i), 20) { // 해당 페이지에 게시글이 존재하는지 확인
+			return i // 게시글이 존재한다면 page num을 리턴합니다.
 		} else {
-			continue
+			continue // 아니라면 반복
 		}
 	}
 
@@ -128,20 +131,24 @@ func getPageTitle(url string, retry int) ([]pageInformation, error) {
 	pages := []pageInformation{}
 
 	numList.Each(func(i int, s *goquery.Selection) {
+
 		title := strings.TrimSpace(s.Find("td.tit div div a").Clone().Children().Remove().End().Text())
+
 		link, exists := s.Find("td.tit div div a").Attr("href")
 		if !exists {
-			// handle error
+			/* handle error */
 		}
+
 		pageNum, err := strconv.Atoi(s.Find("td.num span").Text())
 		if err != nil {
-			// handle error
+			/* handle error */
 		}
+
 		user := s.Find("td.user span").Text()
-		// view, err := strconv.Atoi(s.Find("td.view").Text())
+
 		view, err := strconv.Atoi(strings.Replace(s.Find("td.view").Text(), ",", "", -1))
 		if err != nil {
-			// handle error
+			/* handle error */
 		}
 
 		pageInfo := &pageInformation{
@@ -158,7 +165,7 @@ func getPageTitle(url string, retry int) ([]pageInformation, error) {
 	return pages, nil
 }
 
-func goroutineMethod(pageNum int, c chan []pageInformation) {
+func goroutineMethod(pageNum int, c chan<- []pageInformation) {
 	pages, err := getPageTitle(baseURL+fmt.Sprintf("%v", pageNum), 20)
 	if err != nil {
 		log.Println(err)
@@ -187,35 +194,23 @@ func writePages(pages *[]pageInformation) {
 }
 
 // FIX: 왜 goroutine을 사용하면 에러 발생하는가?
+// Response: goroutine 속 map의 원본을 포인터로 전달하여 수정하도록 쓰여진 코드이기 때문에 발생하는 문제같다. 채널을 통해 데이터를 전달받아서 메인 함수에서 취합하니 해결되었다.
 var goroutineOption = true
 
 func main() {
 	results := []pageInformation{}
-	maxPageNum := getPages()
-	fmt.Println(maxPageNum)
+	maxPageNum := getPages() // 최대 page를 계산해서 받아오는 부분
+	fmt.Println(fmt.Sprint(maxPageNum) + "pages found")
 
-	time.Sleep(time.Second * 5)
+	c := make(chan []pageInformation)
 
-	if goroutineOption {
-		c := make(chan []pageInformation)
+	for i := 1; i <= maxPageNum; i++ {
+		go goroutineMethod(i, c)
+	}
 
-		for i := 1; i <= maxPageNum; i++ {
-			go goroutineMethod(i, c)
-		}
-
-		for i := 1; i <= maxPageNum; i++ {
-			pages := <-c
-			results = append(results, pages...)
-		}
-	} else {
-		for i := 1; i <= maxPageNum; i++ {
-			pages, err := getPageTitle(baseURL+fmt.Sprintf("%v", i), 20)
-			if err != nil {
-				log.Println(err)
-			} else {
-				results = append(results, pages...)
-			}
-		}
+	for i := 1; i <= maxPageNum; i++ {
+		pages := <-c
+		results = append(results, pages...)
 	}
 
 	sort.Slice(results, func(i, j int) bool {
